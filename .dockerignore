@@ -1,0 +1,7 @@
+.git
+.venv
+.warden
+workspace
+**/__pycache__
+*.egg-info
+tests

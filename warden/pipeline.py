@@ -36,13 +36,18 @@ Approver = Callable[[dict], bool]
 @dataclass
 class RunResult:
     run_id: str
-    status: str                      # rejected | declined | executed | failed
+    status: str                      # rejected | awaiting_approval | declined | executed | failed
     stage: str                       # last stage reached
     message: str
     plan: dict | None = None
     verdict: dict | None = None
     dry_run: dict | None = None
     outputs: list[dict] = field(default_factory=list)
+    _record: dict = field(default_factory=dict, repr=False, compare=False)
+
+    def public(self) -> dict:
+        """JSON-safe view for APIs."""
+        return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
 
 class Runtime:
@@ -57,15 +62,53 @@ class Runtime:
         self.auto_approve_read_only = auto_approve_read_only
 
     def run(self, user_input: str) -> RunResult:
+        """Full pipeline in one call, using the synchronous approver."""
+        pending = self.prepare(user_input)
+        if pending.status != "awaiting_approval":
+            return pending
+        if pending.verdict["verdict"] == policy.PROCEED and self.auto_approve_read_only:
+            return self.commit(pending, approved=True, by="auto (read-only)")
+        return self.commit(pending, approved=bool(self.approver(pending.dry_run)), by="human")
+
+    def prepare(self, user_input: str) -> RunResult:
+        """
+        Run every gate up to (not including) approval.
+        Returns status "awaiting_approval" with a dry run, or a final result.
+        Final results are sealed in the audit log; pending ones are sealed by commit().
+        """
         run_id = self.audit.start()
         record: dict = {"input": user_input, "planner": self.planner.name}
         try:
             result = self._run(run_id, user_input, record)
         except Exception as e:  # never let one bad run crash the host
             result = RunResult(run_id, "failed", "internal", f"internal error: {e}")
-        record.update(status=result.status, stage=result.stage, message=result.message)
-        self.audit.seal(run_id, record)
+        result._record = record
+        if result.status != "awaiting_approval":
+            self._seal(result)
         return result
+
+    def commit(self, pending: "RunResult", approved: bool, by: str = "human") -> RunResult:
+        """Approve or reject a prepared run. Executes only if approved."""
+        if pending.status != "awaiting_approval":
+            raise ValueError("run is not awaiting approval")
+        rec = pending._record
+        rec["approval"] = {"approved": approved, "by": by}
+        base = dict(run_id=pending.run_id, plan=pending.plan,
+                    verdict=pending.verdict, dry_run=pending.dry_run)
+        if not approved:
+            result = RunResult(status="declined", stage="approval",
+                               message="not approved — nothing was executed", **base)
+        else:
+            result = self._execute(pending.plan, rec, base)
+        result._record = rec
+        pending.status = "committed"  # a pending run can only be committed once
+        self._seal(result)
+        return result
+
+    def _seal(self, result: "RunResult") -> None:
+        rec = result._record
+        rec.update(status=result.status, stage=result.stage, message=result.message)
+        self.audit.seal(result.run_id, rec)
 
     def _run(self, run_id: str, user_input: str, rec: dict) -> RunResult:
         # 1. guard
@@ -133,17 +176,10 @@ class Runtime:
                              "preflight failed: " + "; ".join(f"{b['id']}: {b['note']}" for b in bad),
                              plan=plan, verdict=verdict, dry_run=dry)
 
-        # 7. approval
-        if v.verdict == policy.PROCEED and self.auto_approve_read_only:
-            approved, how = True, "auto (read-only)"
-        else:
-            approved, how = bool(self.approver(dry)), "human"
-        rec["approval"] = {"approved": approved, "by": how}
-        if not approved:
-            return RunResult(run_id, "declined", "approval", "not approved — nothing was executed",
-                             plan=plan, verdict=verdict, dry_run=dry)
+        return RunResult(run_id, "awaiting_approval", "approval", "waiting for approval",
+                         plan=plan, verdict=verdict, dry_run=dry)
 
-        # 8. execute
+    def _execute(self, plan: dict, rec: dict, base: dict) -> RunResult:
         outputs = []
         for s in plan["steps"]:
             try:
@@ -152,12 +188,12 @@ class Runtime:
             except (SandboxError, OSError) as e:
                 outputs.append({"id": s["id"], "ok": False, "output": str(e)})
                 rec["outputs"] = _trim(outputs)
-                return RunResult(run_id, "failed", "execute",
-                                 f"{s['id']} failed: {e} — remaining steps skipped",
-                                 plan=plan, verdict=verdict, dry_run=dry, outputs=outputs)
+                return RunResult(status="failed", stage="execute",
+                                 message=f"{s['id']} failed: {e} — remaining steps skipped",
+                                 outputs=outputs, **base)
         rec["outputs"] = _trim(outputs)
-        return RunResult(run_id, "executed", "execute", f"executed {len(outputs)} step(s)",
-                         plan=plan, verdict=verdict, dry_run=dry, outputs=outputs)
+        return RunResult(status="executed", stage="execute",
+                         message=f"executed {len(outputs)} step(s)", outputs=outputs, **base)
 
 
 def _trim(outputs: list[dict], limit: int = 2000) -> list[dict]:

@@ -34,7 +34,7 @@ def decide(analysis: dict) -> Verdict:
 
     if f["unknown_actions"]:
         return Verdict(REJECT, "unknown_action",
-                       f"unknown action(s) {f['unknown_actions']} — cannot assess safety")
+                       f"unknown action(s) {', '.join(f['unknown_actions'])} — cannot assess safety")
 
     if not f["all_steps_have_args"]:
         return Verdict(REJECT, "unbounded_step", "a step has no arguments — scope is unbounded")
@@ -45,14 +45,14 @@ def decide(analysis: dict) -> Verdict:
 
     if f["irreversible_actions"]:
         return Verdict(CONFIRM, "irreversible",
-                       f"irreversible action(s): {f['irreversible_actions']}")
+                       f"irreversible action(s): {', '.join(f['irreversible_actions'])}")
 
     if s["explicit_destructive"]:
         return Verdict(CONFIRM, "explicit_destructive", "plan is declared destructive")
 
     if s["implicit_destructive"]:
         return Verdict(CONFIRM, "implicit_destructive",
-                       f"destructive wording {s['implicit_terms']} on a state-changing plan")
+                       f"destructive wording ({', '.join(s['implicit_terms'])}) on a state-changing plan")
 
     if f["multi_step"] and f["state_change"]:
         return Verdict(CONFIRM, "multi_step_state_change",

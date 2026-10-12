@@ -88,12 +88,36 @@ warden shell                 # interactive
 warden log                   # recent runs
 warden verify                # check the audit chain
 warden actions               # the action vocabulary
-pytest -q                    # 50 tests, no model required
+pytest -q                    # 57 tests, no model required
 ```
 
 By default warden uses a small **mock planner** (keyword rules) so you can try
 everything without a GPU. It understands `read X`, `list X`, `search for Y in X`,
 `write "…" to X`, `append "…" to X`, `make folder X`, `delete X`, chained with `then`.
+
+### Web demo
+
+```bash
+python -m warden.web          # http://localhost:8000
+```
+
+A single page where you type a request and watch it move through the seven
+checkpoints, approve or reject the dry run, browse your sandbox and the audit
+log. Every visitor gets a private, throwaway sandbox seeded with sample files
+(wiped after an hour idle), so it is safe to put on the public internet.
+
+**Deploy to Railway:** New Project → Deploy from GitHub repo → pick this repo.
+The included `Dockerfile` and `railway.json` (health check on `/healthz`) do the
+rest; then open the service's Settings → Networking → Generate Domain.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PORT` | `8000` | port to listen on (Railway sets this) |
+| `WARDEN_PLANNER` | `mock` | `ollama` to use a real model |
+| `WARDEN_MODEL` / `WARDEN_VALIDATOR_MODEL` | `warden-primary` / — | Ollama model names |
+| `WARDEN_OLLAMA_URL` | `http://localhost:11434/api/chat` | Ollama endpoint |
+| `WARDEN_SESSION_TTL` | `3600` | seconds before an idle sandbox is deleted |
+| `WARDEN_MAX_SESSIONS` | `300` | cap on concurrent sandboxes |
 
 ### Using a real local model (Ollama)
 
@@ -122,6 +146,8 @@ warden/
   audit.py        hash-chained audit log
   pipeline.py     sequencing only
   cli.py          command-line interface
+  web.py          web demo server (stdlib only)
+  static/         the web page
 tests/            unit + end-to-end tests
 models/           Ollama Modelfiles
 ```
