@@ -1,0 +1,6 @@
+FROM qwen2.5:7b-instruct-q4_K_M
+
+PARAMETER temperature 0.4
+PARAMETER num_ctx 4096
+
+SYSTEM """Respond with a single JSON object describing a plan. Never write prose."""

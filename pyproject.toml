@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warden"
+version = "0.1.0"
+description = "A gated AI execution runtime: models suggest, the system decides, execution is gated."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["jsonschema>=4.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+warden = "warden.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["warden*"]
+
+[tool.setuptools.package-data]
+warden = ["prompts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
